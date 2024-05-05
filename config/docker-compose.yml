@@ -1,0 +1,66 @@
+version: "3"
+
+#==============================================================================
+services:
+  #----------------------------------------------------------------------------
+  tools_base:
+    build: .
+
+    restart:    always
+    stdin_open: true
+    tty:        true
+    user:       user
+    entrypoint: ["bash", "-c"]
+    hostname:   exec-host
+    shm_size:   1gb
+
+    environment:
+      - DISPLAY=unix${DISPLAY}
+
+    volumes:
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+
+      - type: bind
+        source: ${HWB_LOCAL_PROJECT_PATH}
+        target: ${HWB_DOCKER_PROJECT_PATH}
+
+  #----------------------------------------------------------------------------
+  xcelium19:
+    extends: tools_base
+    image:   opensuse/leap:test
+
+    environment:
+      - PATH=/tools/xcelium19/tools/bin:${PATH}
+      - CDS_LIC_FILE=/tools/xcelium19/license.dat
+
+    volumes:
+      - type:   volume
+        source: xcelium19
+        target: /tools/xcelium19
+
+  #----------------------------------------------------------------------------
+  questa_10.7c:
+    extends: tools_base
+    image:   ubuntu:test
+
+    environment:
+      - PATH=/tools/questa/questasim/bin:/tools/questa/visualizer/bin:${PATH}
+      - MGLS_LICENSE_FILE=/tools/questa/license.dat
+
+    volumes:
+      - type:   volume
+        source: questasim_10.7c
+        target: /tools/questa
+
+#==============================================================================
+volumes:
+  shared:
+    external: true
+
+  xcelium19:
+    external: true
+
+  questasim_10.7c:
+    external: true

@@ -1,0 +1,4 @@
+[flow.myflow]
+path = "/work/projects/chain/flows/myflow.py"
+#tools = { questa = "10.7c", vivado = "2021*|2023*" }
+#flows = []

@@ -1,0 +1,5 @@
+[styles]
+info = "bold white"
+warning = "bold yellow"
+error = "bold red"
+debug = "bold white on yellow"
