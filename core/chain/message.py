@@ -40,7 +40,13 @@ def print_error(msg, tag):
 #------------------------------------------------------------------------------
 def print_debug(msg, tag):
     if _debug:
-        _print_message('debug', msg, tag)
+        try:
+            _console.get_style('debug')
+            normal_print = False
+        except:
+            normal_print = True
+
+        _print_message('debug', msg, tag, normal_print)
 
 
 #******************************************************************************
@@ -55,10 +61,10 @@ def _get_msg_tag(tag):
         return '[' + tag + '] '
 
 #------------------------------------------------------------------------------
-def _print_message(severity, msg, tag):
+def _print_message(severity, msg, tag, normal_print=False):
     msg = f'{severity.upper()}: ' + _get_msg_tag(tag) + msg
 
-    if _console is not None:
+    if (_console is not None) and (not normal_print):
         _console.print(f'[{severity}]{msg}[/{severity}]')
     else:
         print(msg)

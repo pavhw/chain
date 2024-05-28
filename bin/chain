@@ -11,8 +11,8 @@ from pathlib import Path
 # Constants
 #
 
-_REQUIRED_PYTHON_VERSION = (3, 11)
-_REQUIRED_PYTHON_PACKAGES = ['rich']
+REQUIRED_PYTHON_VERSION = (3, 11)
+REQUIRED_PYTHON_PACKAGES = ['rich']
 
 
 #******************************************************************************
@@ -58,16 +58,12 @@ def get_command_line_parser():
 
     parser.add_argument(
         '--debug',
-        nargs='?',
-        const=True,
-        type=opt_bool_value,
+        action='store_true',
         help="enable debug messages")
 
     parser.add_argument(
         '-q', '--quiet',
-        nargs='?',
-        const=True,
-        type=opt_bool_value,
+        action='store_true',
         help="disable information messages")
 
     #----------------------------------------------------------------
@@ -110,9 +106,7 @@ def get_command_line_parser():
 
     parser.add_argument(
         '--single-flows-config',
-        nargs='?',
-        const=True,
-        type=opt_bool_value,
+        action='store_true',
         help="if specified with '--flows-config' option, the only this "
              "configuration file will be used, without merging with "
              "an other found config files")
@@ -121,20 +115,20 @@ def get_command_line_parser():
 
 #------------------------------------------------------------------------------
 def main(root_path, args):
-    check_python_version(_REQUIRED_PYTHON_VERSION)
+    check_python_version(REQUIRED_PYTHON_VERSION)
 
     #----------------------------------------------------------------
     # Check required python packages
     #
 
     not_found_packages = list()
-    for name in _REQUIRED_PYTHON_PACKAGES:
+    for name in REQUIRED_PYTHON_PACKAGES:
         if importlib.util.find_spec(name) is None:
             not_found_packages.append(name)
 
     if len(not_found_packages) != 0:
         print(
-            "ERROR: [BUILD/INIT] The following python packages are not "
+            "ERROR: [BUILD/INIT] The following python packages does not "
             "installed:", ', '.join(not_found_packages))
         sys.exit(-1)
 
@@ -148,7 +142,7 @@ def main(root_path, args):
     import chain
     import SCons.Script
 
-    chain.build_env = chain._BuildEnv(root_path, args)
+    chain.build_env = chain.BuildEnv(root_path, args)
 
     #----------------------------------------------------------------
     # Run SCons to build target(s)

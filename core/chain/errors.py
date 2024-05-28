@@ -8,115 +8,140 @@
 #
 #******************************************************************************
 
+from enum import Enum, auto
+
+
+#==============================================================================
+class ChainException(Exception):
+    pass
+
+
 #******************************************************************************
 # Common
 #
 
 #==============================================================================
-class RelativeEnvPath(Exception):
-    '''Relative path is in environment variable, but absolute is expected'''
-
-    def __init__(self, env_name, path_):
-        self.env_name = env_name
-        self.path_ = path_
-
-    def __str__(self):
-        return f"path in '${self.env_name}' is relative: {self.path_}"
-
-
-#******************************************************************************
-# Environment configuration
-#
-
-#==============================================================================
-class ConfigFileNotFound(Exception):
-    '''Configuration file does not found during searching in known locations'''
-
-    def __init__(self, for_what):
-        self.for_what = for_what
-
-    def __str__(self):
-        return f"for {self.for_what}"
-
-
-#==============================================================================
-class ConfigPathError(Exception):
-    '''Path to the config file or to the searching location is incorrect'''
-
+class PathError(ChainException):
     class Kind(Enum):
+        NOT_ABS = auto()
         NOT_DIR = auto()
         NOT_FILE = auto()
-        NOT_EXISTS = auto()
+        NOT_EXIST = auto()
 
-    def __init__(self, path_, kind):
-        self.path_ = path_
+    def __init__(self, path, kind):
+        self.path = path
         self.kind = kind
 
     def __str__(self):
-        if self.kind == self.Kind.NOT_DIR:
-            return f"not a directory: '{self.path_}'"
+        if self.kind == self.Kind.NOT_ABS:
+            msg = 'is not absolute'
+        elif self.kind == self.Kind.NOT_DIR:
+            msg = 'is not a directory'
         elif self.kind == self.Kind.NOT_FILE:
-            return f"not a file: '{self.path_}'"
-        elif self.kind == self.Kind.NOT_EXISTS:
-            return f"does not exist: '{self.path_}'"
+            msg = 'is not a file'
+        elif self.kind == self.Kind.NOT_EXIST:
+            msg = 'does not exist'
+        else:
+            msg = 'unknown kind of the error'
+
+        return f"{msg}: {self.path}"
 
 
 #==============================================================================
-class ConfigLoadingError(Exception):
-    '''Reading error of the config file or incorrect format of it'''
+class ConfigError(ChainException):
+    class Kind(Enum):
+        FINDING_ERROR = auto()
+        FILE_NOT_FOUND = auto()
+        LOADING_ERROR = auto()
+        NO_ENTITY_DATA = auto()
+        PARAMS_NOT_FOUND = auto()
+        NO_CONFIG_PARAM = auto()
 
-    def __init__(self, for_what, path_):
-        self.for_what = for_what
-        self.path_ = path_
+    def __init__(self, kind, **kw):
+        self.kind = kind
+        self.kw = kw
 
     def __str__(self):
-        return f"for {self.for_what} from file: {self.path_}"
+        if 'path' in self.kw:
+            file_path_msg = " (in file: {self.kw['path']})"
+        else:
+            file_path_msg = ''
+
+        match self.kind:
+            case self.Kind.FINDING_ERROR:
+                return "config file finding is failed"
+
+            case self.Kind.FILE_NOT_FOUND:
+                return "config file does not found"
+
+            case self.Kind.LOADING_ERROR:
+                return f"loading error of the config file: {self.kw['path']}"
+
+            case self.Kind.NO_ENTITY_DATA:
+                return (f"entry key '{self.kw['entry']}' does not found "
+                        f"or empty{file_path_msg}")
+
+            case self.Kind.PARAMS_NOT_FOUND:
+                return (f"no parameters is found in the entry"
+                        f"'{self.kw['entry']}'{file_path_msg}")
+
+            case self.Kind.NO_CONFIG_PARAM:
+                return (f"required parameter '{self.kw['param']}' "
+                        f"does not found in the entry '{self.kw['entry']}'"
+                        f"{file_path_msg}")
+
+        return 'unknown kind of the error'
 
 
 #==============================================================================
-class ConfigDataNotFound(Exception):
-    '''Required data is not found in the config file'''
+class ConfigLoaderError(ChainException):
+    class Kind(Enum):
+        OPEN = auto()
+        LOAD = auto()
+        FORMAT = auto()
 
-    def __init__(self, for_what, name):
-        self.for_what = for_what
-        self.name = name
+    def __init__(self, kind, **kw):
+        self.kind = kind
+        self.kw = kw
 
     def __str__(self):
-        return f"for {self.for_what} '{self.name}'"
+        match self.kind:
+            case self.Kind.OPEN:
+                return f"opening error of the file '{self.kw['path']}'"
+            case self.Kind.LOAD:
+                return f"incorrect format of the file '{self.kw['path']}'"
+            case self.Kind.FORMAT:
+                return f"unsupported config format '{self.kw['format']}'"
+
+        return 'unknown kind of the error'
 
 
 #==============================================================================
-class ConfigKeyNotFound(Exception):
-    '''Required key does not found in configuration data'''
-
-    def __init__(self, key, for_what, name):
-        self.key = key
-        self.for_what = for_what
-        self.name = name
+class ConfigFinderError(ChainException):
+    def __init__(self, loc):
+        self.loc = loc
 
     def __str__(self):
-        return f"'{self.key}' for {self.for_what} '{name}'"
+        return 'searching in the ' + str(self.loc)
 
 
 #==============================================================================
-class EmptyConfigData(Exception):
-    '''No data for specified entity kind'''
+class BuildEnvError(ChainException):
+    class Kind(Enum):
+        TOOL_NOT_FOUND = auto()
+        TOOL_VERSION = auto()
 
-    def __init__(self, for_what):
-        self.for_what = for_what
-
-    def __str__(self):
-        return f"for {self.for_what}"
-
-
-#==============================================================================
-class ToolPathNotExist(Exception):
-    '''Path to the SCons tool (for build tools or for flows) is incorrect'''
-
-    def __init__(self, for_what, name, path_):
-        self.for_what = for_what
-        self.name = name
-        self.path_ = path_
+    def __init__(self, kind, **kw):
+        self.kind = kind
+        self.kw = kw
 
     def __str__(self):
-        return f"for {self.for_what} '{self.name}': {self.path_}"
+        if self.kind == self.Kind.TOOL_NOT_FOUND:
+            msg = f"required build tool '{kw['tool']}' was not found"
+        elif self.kind == self.Kind.TOOL_VERSION:
+            msg = (f"requested version(s) of the tool '{kw['tool']}' "
+                   f"was not found: {kw['version']}")
+        else:
+            msg = 'unknown kind of the error'
+
+        return f"{msg}: {self.path}"

@@ -10,170 +10,246 @@
 
 import os
 import sys
+import tomllib
 from pathlib import Path
-from enum import Enum, auto
 
 import chain
-from chain.message import print_info, print_error
+from chain.message import *
 from chain.errors import *
 
 
 #==============================================================================
-class ConfigFile:
-    '''Searching of config files in known locations.
+class ConfigFinder:
+    #--------------------------------------------------------------------------
+    def __init__(self, file_name=None, stop_on_first=True):
+        self.locations = list()
+        self.file_name = file_name
+        self.__stop_on_first = stop_on_first
 
-    Searching is performed in the following order:
+    #--------------------------------------------------------------------------
+    def set_file_name(self, file_name):
+        self.file_name = file_name
 
-        - path to the file, specified in appropriate command-line parameter;
+        for loc in self.locations:
+            loc.file_name = file_name
 
-        - current working directory (usually this is a project root);
+    #--------------------------------------------------------------------------
+    def stop_on_first(self, value=True):
+        self.__stop_on_first = value
 
-        - path to the config home directory, specified in command-line;
+    #--------------------------------------------------------------------------
+    def insert_arg_opt(
+            self, pos, name, args,
+            is_dir=False, path_prefix=None, should_exist=True):
 
-        - $CHAIN_CONFIG_HOME, if this environment variable is set;
+        value = args.get(name[2:].replace('-', '_'))
 
-        - $XDG_CONFIG_HOME/<config_subdir>, if the '$XDG_CONFIG_HOME'
-          environment variable is set (see the note below, marked with a '*');
+        loc = ConfigLoc(
+            ConfigLoc.ARG_OPT, name, value, is_dir, path_prefix, should_exist,
+            self.file_name)
 
-        - ~/.config/<config_subdir> (see the note below, marked with a '*');
+        self.locations.insert(pos, loc)
 
-        - default config path (the 'config' subdirectory in the path,
-          where build system is installed).
+    #--------------------------------------------------------------------------
+    def insert_env_var(
+            self, pos, name,
+            is_dir=False, path_prefix=None, should_exist=True):
 
-    * - if the '$CHAIN_CONFIG_DIR_NAME' variable does not set, <config_subdir>
-    is 'chain', otherwise it is set by value from the '$CHAIN_CONFIG_DIR_NAME'
-    variable.
+        value = os.environ.get(name)
 
-    Path to the found file(s) can be used from 'self.paths' list.
-    '''
+        loc = ConfigLoc(
+            ConfigLoc.ENV_VAR, name, value, is_dir, path_prefix, should_exist,
+            self.file_name)
+
+        self.locations.insert(pos, loc)
+
+    #--------------------------------------------------------------------------
+    def insert_path(
+            self, pos, name, path,
+            is_dir=False, path_prefix=None, should_exist=True):
+
+        loc = ConfigLoc(
+            ConfigLoc.PATH, name, path, is_dir, path_prefix, should_exist,
+            self.file_name)
+
+        self.locations.insert(pos, loc)
+
+    #--------------------------------------------------------------------------
+    def append_arg_opt(
+            self, name, args,
+            is_dir=False, path_prefix=None, should_exist=True):
+
+        self.insert_arg_opt(
+            len(self.locations), 
+            name, args, is_dir, path_prefix, should_exist)
+
+    #--------------------------------------------------------------------------
+    def append_env_var(
+            self, name, is_dir=False, path_prefix=None, should_exist=True):
+
+        self.insert_env_var(
+            len(self.locations), name, is_dir, path_prefix, should_exist)
+
+    #--------------------------------------------------------------------------
+    def append_path(
+            self, name, path,
+            is_dir=False, path_prefix=None, should_exist=True):
+
+        self.insert_path(
+            len(self.locations), 
+            name, path, is_dir, path_prefix, should_exist)
+
+    #--------------------------------------------------------------------------
+    def prepend_arg_opt(
+            self, name, args,
+            is_dir=False, path_prefix=None, should_exist=True):
+        self.insert_arg_opt(0, name, args, is_dir, path_prefix, should_exist)
+
+    #--------------------------------------------------------------------------
+    def prepend_env_var(
+            self, name, is_dir=False, path_prefix=None, should_exist=True):
+        self.insert_env_var(0, name, is_dir, path_prefix, should_exist)
+
+    #--------------------------------------------------------------------------
+    def prepend_path(
+            self, name, path,
+            is_dir=False, path_prefix=None, should_exist=True):
+        self.insert_path(0, name, path, is_dir, path_prefix, should_exist)
+
+    #--------------------------------------------------------------------------
+    def delete_loc(self, n):
+        try:
+            del self.locations[n]
+        except:
+            pass
+
+    #--------------------------------------------------------------------------
+    def delete_first_loc(self):
+        self.delete_loc(0)
+
+    #--------------------------------------------------------------------------
+    def delete_last_loc(self):
+        self.delete_loc(len(self.locations)-1)
+
+    #--------------------------------------------------------------------------
+    def find(self):
+        paths = list()
+
+        for loc in self.locations:
+            try:
+                result = loc.find()
+            except PathError as e:
+                raise ConfigFinderError(loc) from e
+
+            debug_msg = f'Searching in the {loc}: '
+            msg_tag = 'CONFIG'
+
+            if result is None:
+                print_debug(debug_msg + 'not found', msg_tag)
+                continue
+
+            print_debug(debug_msg + 'ok', msg_tag)
+            paths.append(result)
+
+            if self.__stop_on_first:
+                break
+
+        if len(paths) == 0:
+            return None
+        elif self.__stop_on_first:
+            return paths[0]
+        else:
+            return paths
+
+
+#==============================================================================
+class ConfigLoc:
+    ARG_OPT = 0
+    ENV_VAR = 1
+    PATH = 2
 
     #--------------------------------------------------------------------------
     def __init__(
-            self, *, for_what, args, arg_name, file_name, default_path,
-            find_all, message_tag = 'BUILD/INIT/CONFIG'):
-        self.for_what = for_what
+            self, kind, name, value,
+            is_dir, path_prefix, should_exist, file_name):
+        self.kind = kind
+        self.name = name
+        self.value = value
+        self.is_dir = is_dir
+        self.path_prefix = path_prefix
+        self.should_exist = should_exist
         self.file_name = file_name
-        self.find_all = find_all
-        self.message_tag = message_tag
-        self.file_path = None
-
-        cfg_dir = Path(os.environ.get('CHAIN_CONFIG_DIR_NAME', 'chain'))
-        user_config_subdir = Path('.config') / cfg_dir
-
-        if (not self.__load_from_arg(args, arg_name, is_dir=False)
-                and not self.__load_from_project_root(args)
-                and not self.__load_from_arg(args, 'config_home', is_dir=True)
-                and not self.__load_from_env_path('CHAIN_CONFIG_HOME')
-                and not self.__load_from_env_path('XDG_CONFIG_HOME', cfg_dir)
-                and not self.__load_from_env_path('HOME', user_config_subdir)
-                and not self.__load_from_path(default_path, 'default path')
-                and self.file_path is None):
-            print_error(
-                f"Configuration file for {for_what} does not found",
-                self.message_tag)
-            raise ConfigFileNotFound(for_what)
-
-        if self.find_all:
-            print_debug(
-                f"Configuration files used for {self.for_what}: "
-                f"'{self.file_path}'", self.message_tag)
 
     #--------------------------------------------------------------------------
-    def __set_config_origin(self, file_path, origin):
-        if self.paths is None:
-            self.paths = list()
+    def find(self):
+        if self.value is None:
+            return None
 
-        self.paths.append(file_path)
+        path = Path(self.value)
 
-        if self.find_all:
-            return False
+        if self.path_prefix is None and not path.is_absolute():
+            raise PathError(path, PathError.Kind.NOT_ABS)
+        elif not path.is_absolute():
+            path = Path(self.path_prefix) / path
+
+        if self.should_exist and not path.exists():
+            raise PathError(path, PathError.Kind.NOT_EXIST)
+
+        if self.is_dir:
+            if self.should_exist and not path.is_dir():
+                raise PathError(path, PathError.Kind.NOT_DIR)
+
+            file_path = path / self.file_name
         else:
-            print_debug(
-                f"Configuration for {self.for_what} is used from {origin}: "
-                f"'{self.file_path}'", self.message_tag)
-
-            return True
-
-    #--------------------------------------------------------------------------
-    def __load_from_arg(self, args, arg_name, is_dir=False):
-        try:
-            path_ = Path(args[arg_name])
-        except:
-            return False
-
-        if is_dir:
-            if not path_.is_dir():
-                print_error(
-                    f"Path is not directory "
-                    f"(location of the config file for {self.for_what}): "
-                    f"{path_}",
-                    self.message_tag)
-                raise ConfigPathError(path_, ConfigPathError.Kind.NOT_DIR)
-
-            file_path = path_ / self.file_name
-        else:
-            file_path = path_
+            file_path = path
 
         file_path = file_path.resolve()
-        msg = (f"(config file for {self.for_what}, "
-               f"specified in command-line argument): {file_path}")
-
-        if not file_path.exists():
-            print_error(f"File does not found {msg}", self.message_tag)
-            raise ConfigPathError(path_, ConfigPathError.Kind.NOT_EXISTS)
 
         if file_path.is_dir():
-            print_error(f"Path is directory {msg}", self.message_tag)
-            raise ConfigPathError(path_, ConfigPathError.Kind.NOT_FILE)
+            raise PathError(file_path, PathError.Kind.NOT_FILE)
 
-        return self.__set_config_origin(file_path, "command-line argument")
+        if file_path.exists():
+            return file_path
+        else:
+            return None
 
     #--------------------------------------------------------------------------
-    def __load_from_project_root(self, args):
+    def __str__(self):
+        match self.kind:
+            case self.ARG_OPT:
+                return f"path from command-line option '{self.name}'"
+            case self.ENV_VAR:
+                return f"path from environment variable '${self.name}'"
+            case self.PATH:
+                return f"{self.name}: {self.value}"
+
+
+#==============================================================================
+class ConfigLoader:
+    #--------------------------------------------------------------------------
+    def __init__(self, file_path, format='toml'):
+        self.file_path = file_path
+        self.format = format
+        self.dict = dict()
+
+    #--------------------------------------------------------------------------
+    def load(self):
         try:
-            file_path = Path(args['project_root']) / self.file_name
-        except:
-            return False
+            f = open(self.file_path, 'rb')
+        except Exception as e:
+            raise ConfigLoaderError(
+                ConfigLoaderError.Kind.OPEN, path=file_path) from e
 
-        if not file_path.exists():
-            return False
-
-        return self.__set_config_origin(file_path, 'project root')
-
-    #--------------------------------------------------------------------------
-    def __load_from_path(self, path_, loc):
-        if not path_.exists():
-            return False
-
-        if not path_.is_dir():
-            print_error(
-                f"Finding config '{self.file_name}' in '{loc}', "
-                f"but this path is to a file, not to a directory: {path_}",
-                self.message_tag)
-            raise ConfigPathError(path_, ConfigPathError.Kind.NOT_DIR)
-
-        file_path = path_ / self.file_name
-
-        if not file_path.exists():
-            return False
-
-        return self.__set_config_origin(file_path, loc)
+        if self.format == 'toml':
+            return self.load_toml(f)
+        else:
+            raise ConfigLoaderError(
+                ConfigLoaderError.Kind.FORMAT, format=format)
 
     #--------------------------------------------------------------------------
-    def __load_from_env_path(self, env_var, subdir=''):
+    def load_toml(self, f):
         try:
-            env_var_path = Path(os.environ[env_var])
-        except:
-            return False
-
-        loc = os.path.join('$' + env_var, subdir)
-
-        if not env_var_path.is_absolute():
-            print_error(
-                f"Finding config '{self.file_name}' in '{loc}'. "
-                f"Path in the '${env_var}' environment variable "
-                f"should be absolute, but set to '{env_var_path}'",
-                self.message_tag)
-            raise RelativeEnvPath(env_var, env_var_path)
-
-        return self.__load_from_path(env_var_path / subdir, loc)
+            return tomllib.load(f)
+        except Exception as e:
+            raise ConfigLoaderError(
+                ConfigLoaderError.Kind.LOAD, path=f.name) from e
