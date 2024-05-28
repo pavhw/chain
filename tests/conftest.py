@@ -66,26 +66,42 @@ def main():
 def run_chain(main, fake_chain_root):
     return RunWithArgs(main, fake_chain_root)
 
+#------------------------------------------------------------------------------
+@pytest.fixture(scope="session")
+def cwd():
+    return Path.cwd()
+
 
 #******************************************************************************
 # Autouse fixtures
 #
 
 #------------------------------------------------------------------------------
-@pytest.fixture(autouse=True, scope="session")
-def run_test_root():
-    return Path.cwd()
-
-#------------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
-def fake_chain_root(tmp_path, run_test_root):
+def fake_chain_root(tmp_path, cwd):
     root = tmp_path / 'chain_root'
     root.mkdir()
 
     core_path = root / 'core'
-    core_path.symlink_to(run_test_root / 'core', target_is_directory=True)
+    core_path.symlink_to(cwd / 'core', target_is_directory=True)
 
     return root.resolve()
+
+#------------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def fake_config_dir(fake_chain_root):
+    cfg_dir = fake_chain_root / 'config'
+    cfg_dir.mkdir()
+
+    return cfg_dir
+
+#------------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def theme_config_link(cwd, fake_config_dir):
+    file = cwd / 'config' / 'theme.toml'
+    link = fake_config_dir / 'theme.toml'
+
+    link.symlink_to(file, target_is_directory=False)
 
 #------------------------------------------------------------------------------
 @pytest.fixture(autouse=True, scope="session")
